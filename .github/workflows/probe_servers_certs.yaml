@@ -49,11 +49,20 @@ jobs:
           curl -qfsSL "https://$INVENTORY_REPO_USER:$INVENTORY_REPO_TOKEN@raw.githubusercontent.com/$INVENTORY_REPO_USER/rishi/main/.github/scripts/_init_deps.sh" -o "./_init_deps.sh"
           dos2unix --quiet "./_init_deps.sh" 2>/dev/null ; sudo chmod +xwr "./_init_deps.sh" ; source "./_init_deps.sh" >/dev/null 2>&1
           ##Main
+          #crt.sh is down (502 / pg refused) for days at a time. This used to exit 1,
+          #which skipped the whole script -- including the CertStream (THC) and NRD
+          #stages, which do not depend on crt.sh at all. Now it only records whether
+          #crt.sh is usable; the script reads CRT_SH_UP and skips just that stage.
           if pg_isready --host="crt.sh" --port="5432" --username="guest" --dbname="certwatch" --timeout="10" | grep -q "no response" || curl -qfksSL -A "Chrome" -I "https://crt.sh" --write-out "%{http_code}" -o /dev/null | grep -q 502; then
-              echo -e "\n[-] Failed to connect to crt.sh\n"
+              echo -e "\n[-] Failed to connect to crt.sh -- continuing with CertStream (THC) + NRD only\n"
               curl -qfksSL -A "Chrome" "https://crt.sh" -I
-            exit 1
+              echo "false" > "/tmp/crt_sh_up"
           else
+              echo -e "\n[+] crt.sh reachable\n"
+              echo "true" > "/tmp/crt_sh_up"
+          fi
+          #How many daily CertStream dumps to sweep (~1 GB gz each, ~20s CPU each)
+          echo "${THC_DAYS:-3}" > "/tmp/thc_days"
              # Download
              curl -qfsSL "https://$INVENTORY_REPO_USER:$INVENTORY_REPO_TOKEN@raw.githubusercontent.com/$INVENTORY_REPO_USER/rishi/main/.github/scripts/probe_servers_certs.sh" -o "./probe_servers_certs.sh"
              dos2unix "./probe_servers_certs.sh" ; sudo chmod +xwr "./probe_servers_certs.sh"
@@ -83,7 +92,6 @@ jobs:
              echo -e "\n\n[+] Tmux TTY: http://$TS_DNS:7070"
              echo -e "[+] BTOP: http://$TS_DNS:7777\n"
              set +x ; while tmux has-session -t "inventory" ; do sleep 1 ; done
-          fi
         continue-on-error: true
 
       - name: Package Debug Log
